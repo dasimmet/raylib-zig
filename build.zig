@@ -13,12 +13,12 @@ const Program = struct {
 pub fn link(
     b: *std.Build,
     exe: *std.Build.Step.Compile,
-    target: std.zig.CrossTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.Mode,
 ) void {
     const lib = getRaylib(b, target, optimize);
 
-    const target_os = exe.target.toTarget().os.tag;
+    const target_os = exe.rootModuleTarget().os.tag;
     switch (target_os) {
         .windows => {
             exe.linkSystemLibrary("winmm");
@@ -60,10 +60,10 @@ pub fn link(
     exe.linkLibrary(lib);
 }
 
-var _raylib_lib_cache: ?*std.build.Step.Compile = null;
+var _raylib_lib_cache: ?*std.Build.Step.Compile = null;
 pub fn getRaylib(
     b: *std.Build,
-    target: std.zig.CrossTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.Mode,
 ) *std.Build.Step.Compile {
     if (_raylib_lib_cache) |lib| return lib else {
@@ -91,7 +91,7 @@ fn getModuleInternal(b: *std.Build) *std.Build.Module {
     if (b.modules.contains("raylib")) {
         return b.modules.get("raylib").?;
     }
-    return b.addModule("raylib", .{ .source_file = .{ .path = "lib/raylib-zig.zig" } });
+    return b.addModule("raylib", .{ .root_source_file = .{ .path = "lib/raylib-zig.zig" } });
 }
 
 pub const math = struct {
@@ -106,8 +106,8 @@ pub const math = struct {
     fn getModuleInternal(b: *std.Build) *std.Build.Module {
         const raylib = rl.getModuleInternal(b);
         return b.addModule("raylib-math", .{
-            .source_file = .{ .path = "lib/raylib-zig-math.zig" },
-            .dependencies = &.{.{ .name = "raylib-zig", .module = raylib }},
+            .root_source_file = .{ .path = "lib/raylib-zig-math.zig" },
+            .imports = &.{.{ .name = "raylib-zig", .module = raylib }},
         });
     }
 };
@@ -185,10 +185,10 @@ pub fn build(b: *std.Build) !void {
     const raylib_math = rl.math.getModuleInternal(b);
 
     for (examples) |ex| {
-        if (target.getOsTag() == .emscripten) {
+        if (target.result.os.tag == .emscripten) {
             const exe_lib = compileForEmscripten(b, ex.name, ex.path, target, optimize);
-            exe_lib.addModule("raylib", raylib);
-            exe_lib.addModule("raylib-math", raylib_math);
+            exe_lib.root_module.addImport("raylib", raylib);
+            exe_lib.root_module.addImport("raylib-math", raylib_math);
             const raylib_lib = getRaylib(b, target, optimize);
 
             // Note that raylib itself isn't actually added to the exe_lib
@@ -210,8 +210,8 @@ pub fn build(b: *std.Build) !void {
                 .target = target,
             });
             rl.link(b, exe, target, optimize);
-            exe.addModule("raylib", raylib);
-            exe.addModule("raylib-math", raylib_math);
+            exe.root_module.addImport("raylib", raylib);
+            exe.root_module.addImport("raylib-math", raylib_math);
             const run_cmd = b.addRunArtifact(exe);
             const run_step = b.step(ex.name, ex.desc);
             run_step.dependOn(&run_cmd.step);
@@ -246,7 +246,7 @@ pub fn compileForEmscripten(
     b: *std.Build,
     name: []const u8,
     root_source_file: []const u8,
-    target: std.zig.CrossTarget,
+    target: std.Build.ResolvedTarget,
     optimize: std.builtin.Mode,
 ) *std.Build.Step.Compile {
     // TODO: It might be a good idea to create a custom compile step, that does
@@ -254,13 +254,13 @@ pub fn compileForEmscripten(
     // the make function of the step. However it might also be a bad idea since
     // it messes with the build system itself.
 
-    const new_target = updateTargetForWeb(target);
+    // const new_target = updateTargetForWeb(target);
 
     // The project is built as a library and linked later.
     const exe_lib = b.addStaticLibrary(.{
         .name = name,
         .root_source_file = .{ .path = root_source_file },
-        .target = new_target,
+        .target = target,
         .optimize = optimize,
     });
 
